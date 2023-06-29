@@ -13,13 +13,13 @@ train_pipeline = [
     dict(type='LoadImageFromFile'),
     dict(type='Resize', scale=640, backend='pillow', keep_ratio=True, interpolation='bicubic'),
     dict(type='RandomFlip', prob=0.5, direction='horizontal'),
-    dict(type='PackClsInputs'),
+    dict(type='PackInputs'),
 ]
 test_pipeline = [
     dict(type='LoadImageFromFile'),
     dict(type='Resize', scale=640, backend='pillow', keep_ratio=True, interpolation='bicubic'),
-    dict(type='CenterCrop', crop_size=320),
-    dict(type='PackClsInputs'),
+    # dict(type='CenterCrop', crop_size=320),
+    dict(type='PackInputs'),
 ]
 
 train_dataloader = dict(
@@ -58,6 +58,7 @@ test_dataloader = dict(
     sampler=dict(type='DefaultSampler', shuffle=False),
 )
 
-# Specify the evaluation metric for validation and testing.
-val_evaluator = dict(type='Accuracy', topk=1)
+val_evaluator = [
+    dict(type='MultiLabelMetric', topk=1, average=None),
+    dict(type='Accuracy', topk=1)]
 test_evaluator = val_evaluator
