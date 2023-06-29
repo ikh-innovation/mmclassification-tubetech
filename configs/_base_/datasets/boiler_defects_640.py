@@ -59,6 +59,6 @@ test_dataloader = dict(
 )
 
 val_evaluator = [
-    dict(type='MultiLabelMetric', topk=1, average=None),
+    dict(type='MultiLabelMetric', topk=1),
     dict(type='Accuracy', topk=1)]
 test_evaluator = val_evaluator
