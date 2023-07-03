@@ -3,6 +3,7 @@ import os
 import cv2
 import platform
 import numpy as np
+from mmpretrain import ImageClassificationInferencer
 
 
 VID_FORMATS = 'asf', 'avi', 'gif', 'm4v', 'mkv', 'mov', 'mp4', 'mpeg', 'mpg', 'ts', 'wmv'  # include video suffixes
@@ -52,57 +53,87 @@ class LoadVideo:
             return cv2.rotate(im, cv2.ROTATE_180)
         return im
 
-def add_box(img, color=[0,255,0]):
-    img[:, :10, :] = color
-    img[:, -10:, :] = color
-    img[:10, :, :] = color
-    img[ -10  :, :, :] = color
 
-    return img
+class TileImage:
+    """
+    Args:
+        img: numpy array
+        n_tiles: has to be in power of 2.
+    """
 
-def split(img, n_tiles=4):
-    tile_shape = np.array(im.shape)//n_tiles
-
-    tiles = img.reshape(n_tiles,tile_shape[0],n_tiles, tile_shape[1], 3)
-    tiles = np.transpose(tiles, (0, 2, 1, 3, 4))
-    tiles = tiles.reshape(-1, tile_shape[0], tile_shape[1], 3)
-
-    for t in tiles:
-        add_box(t)
-        cv2.namedWindow("test", cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
-        cv2.resizeWindow("test", img.shape[0], img.shape[1])
-        cv2.imshow("test", t)
-        # cv2.imshow("awd", img)
-        cv2.waitKey(7200)
-    imgr = tiles.reshape(img.shape)
-
-    cv2.namedWindow("test", cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
-    cv2.resizeWindow("test", img.shape[0], img.shape[1])
-    cv2.imshow("test", imgr)
-    # cv2.imshow("awd", img)
-    cv2.waitKey(7200)
-
-    # for x_tile in np.split(n_tiles, img):
-    #     for y_tile in  np.split(n_tiles, x_tile, axis=1):
-    #         print(0)
-    return 0
+    def __init__(self, img, n_tiles=4):
+        self.img = img
+        self.n_tiles = np.sqrt(n_tiles).astype(int)
+        self.tile_shape = np.array(im.shape) // self.n_tiles
+        self.tiles = None
+        self.reconstructed_image = None
 
 
+    def make_tiles(self):
+        # split into sqrt(tiles)
+        self.tiles = self.img.reshape(self.n_tiles, self.tile_shape[0], self.n_tiles, self.tile_shape[1], 3)
+        self.tiles = np.transpose(self.tiles, (0, 2, 1, 3, 4))
+        self.tiles = self.tiles.reshape(-1, self.tile_shape[0], self.tile_shape[1], 3)
+
+    def reconstruct_tiled_image(self):
+        ''' reconstruct image from tiles'''
+
+        recon_img = self.tiles.reshape(self.n_tiles, self.n_tiles, self.tile_shape[0], self.tile_shape[1], 3)
+        recon_img = np.transpose(recon_img, (0, 2, 1, 3, 4))
+        recon_img = recon_img.reshape( *self.img.shape)
+        self.reconstructed_image = recon_img
+
+    def infer_tiles(self, model):
+        def add_box(img, color=[0, 255, 0]):
+            img[:, :10, :] = color
+            img[:, -10:, :] = color
+            img[:10, :, :] = color
+            img[-10:, :, :] = color
+            return img
+
+        self.make_tiles()
+
+        tile_list = [t for t in self.tiles]
+
+        results = model(tile_list)
+
+        for t, r in zip(tile_list, results):
+            if not bool(r['pred_label']):
+                add_box(t, [0, 255, 0])
+            else:
+                add_box(t, [0, 0, 255])
+
+
+        self.reconstruct_tiled_image()
+        return self.reconstructed_image
+
+
+video_path = "../../boiler_unit_9.mp4"
+# image = 'https://github.com/open-mmlab/mmpretrain/raw/main/demo/demo.JPEG'
+model_folder = "../work_dirs/efficientnet-b5_2xb4_in1k-456px_boiler_defects/"
+# config = model_folder + "efficientnet-b5_2xb4_in1k-456px_boiler_defects.py"
+config = "../configs/efficientnet/efficientnet-b5_2xb4_in1k-456px_boiler_defects.py"
+checkpoint = model_folder + "best_accuracy_top1_epoch_53.pth"
+inferencer = ImageClassificationInferencer(model=config, pretrained=checkpoint, device='cuda')
 
 
 # Stream results
-
-video_path = "../../boiler_unit_9.mp4"
 vid_iter = LoadVideo(video_path)
 
+first_frame, _ = next(vid_iter)
 if platform.system() == 'Linux':
     cv2.namedWindow(str(video_path), cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
-    # cv2.resizeWindow(str(video_path), im.shape[1], im.shape[0])
+    cv2.resizeWindow(str(video_path), first_frame.shape[1], first_frame.shape[0])
 
-for (im, s) in vid_iter:
+
+for  i, (im, s) in enumerate(vid_iter):
+    if i <1200: continue
     # im0 = annotator.result()
-    split(im)
-    cv2.imshow(str(video_path), im)
+    tile_image = TileImage(im)
+    recon_img = tile_image.infer_tiles(inferencer)
+
+
+    cv2.imshow(str(video_path), recon_img)
     print(s)
 
     key = cv2.waitKey(1) & 0xFF
