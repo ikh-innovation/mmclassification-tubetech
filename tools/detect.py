@@ -10,13 +10,15 @@ VID_FORMATS = 'asf', 'avi', 'gif', 'm4v', 'mkv', 'mov', 'mp4', 'mpeg', 'mpg', 't
 
 
 class LoadVideo:
-    # YOLOv5 image/video dataloader, i.e. `python detect.py --source image.jpg/vid.mp4`
-    def __init__(self, path, transforms=None, vid_stride=1):
+    # image/video dataloader similar(stolen) with Yolov5.
+
+    def __init__(self, path, vid_stride=1, starting_frame=None):
         assert path.split('.')[-1].lower() in VID_FORMATS, 'not supported video format or wrong path'
         self.path = path
-        self.transforms = transforms  # optional
         self.vid_stride = vid_stride  # video frame-rate stride
         self._new_video()
+        if starting_frame:
+            self._go_to_frame(starting_frame)
 
     def __iter__(self):
         self.count = 0
@@ -40,6 +42,7 @@ class LoadVideo:
         self.frame = 0
         self.cap = cv2.VideoCapture(self.path)
         self.frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) / self.vid_stride)
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         self.orientation = int(self.cap.get(cv2.CAP_PROP_ORIENTATION_META))  # rotation degrees
         # self.cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 0)  # disable https://github.com/ultralytics/yolov5/issues/8493
 
@@ -53,21 +56,23 @@ class LoadVideo:
             return cv2.rotate(im, cv2.ROTATE_180)
         return im
 
+    def _go_to_frame(self, frame_no):
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
+        print('video Position set: ', int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)))
+
 
 class TileImage:
     """
     Args:
         img: numpy array
-        n_tiles: has to be in power of 2.
     """
 
     def __init__(self, img, n_tiles=4):
         self.img = img
-        self.n_tiles = np.sqrt(n_tiles).astype(int)
-        self.tile_shape = np.array(im.shape) // self.n_tiles
+        self.n_tiles = int(n_tiles//2) if n_tiles>1 else 1
+        self.tile_shape = np.array(img.shape) // self.n_tiles
         self.tiles = None
         self.reconstructed_image = None
-
 
     def make_tiles(self):
         # split into sqrt(tiles)
@@ -83,13 +88,28 @@ class TileImage:
         recon_img = recon_img.reshape( *self.img.shape)
         self.reconstructed_image = recon_img
 
-    def infer_tiles(self, model):
-        def add_box(img, color=[0, 255, 0]):
-            img[:, :10, :] = color
-            img[:, -10:, :] = color
-            img[:10, :, :] = color
-            img[-10:, :, :] = color
-            return img
+    def infer_tiles(self, model, conf_thresh = 0.8):
+        def add_classification_visuals(img, pred_class, conf: float, correct=True,  threshold=None, frame_thickness=10):
+
+            color = (0, 255, 0) if correct else (0, 0, 255)
+
+            # add color frame
+            img[:, :frame_thickness, :] = color
+            img[:, -frame_thickness:, :] = color
+            img[:frame_thickness, :, :] = color
+            img[-frame_thickness:, :, :] = color
+
+            # add text
+            cv2.putText(img=img, text="confidence: " + str(round(conf, 2)), org=(50, 80),
+                        fontFace=3, fontScale=1.5, color=color, thickness=2)
+
+            cv2.putText(img=img, text="class: " + pred_class, org=(50, 130),
+                        fontFace=3, fontScale=1.5, color=color, thickness=2)
+
+            if threshold:
+                cv2.putText(img=img, text="threshold: " +  str(round(threshold, 2)), org=(50, 180),
+                        fontFace=3, fontScale=1.5, color=(255,0,0), thickness=2)
+
 
         self.make_tiles()
 
@@ -98,45 +118,76 @@ class TileImage:
         results = model(tile_list)
 
         for t, r in zip(tile_list, results):
-            if not bool(r['pred_label']):
-                add_box(t, [0, 255, 0])
-            else:
-                add_box(t, [0, 0, 255])
 
+            # classified as correct/clean only if it passed a threshold of confidence
+            # correct = not bool(r['pred_label']) and (r['pred_score'] > conf_thresh)
+
+            # pure model prediction
+            correct = not bool(r['pred_label'])
+
+            add_classification_visuals(t, pred_class=r['pred_class'], conf=r['pred_score'],
+                                       correct=correct) #  threshold=conf_thresh
 
         self.reconstruct_tiled_image()
         return self.reconstructed_image
 
 
+class VideoTileInferencer:
+
+    def __init__(self, video_path, config, checkpoint, video_export_path=None, n_tiles=4, vid_stride=1, starting_frame=None, show=True):
+        self.video_path = video_path
+        self.video_export_path = video_export_path
+        self.config = config
+        self.checkpoint = checkpoint
+        self.n_tiles = n_tiles
+        self.vid_stride = vid_stride
+        self.show = show
+
+        self.vid_iter = LoadVideo(self.video_path, self.vid_stride, starting_frame)
+        first_frame, _ = next(self.vid_iter)
+
+        self.inferencer = ImageClassificationInferencer(model=config, pretrained=checkpoint, device='cuda')
+
+        if platform.system() == 'Linux' and show:
+            cv2.namedWindow(str(self.video_path), cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
+            cv2.resizeWindow(str(self.video_path), first_frame.shape[1], first_frame.shape[0])
+
+        if self.video_path:
+            self.video_export = cv2.VideoWriter(video_export_path, cv2.VideoWriter_fourcc(*'MJPG'), self.vid_iter.fps//self.vid_stride,
+                                                (first_frame.shape[1], first_frame.shape[0]))
+
+    def start(self):
+        for i, (im, s) in enumerate(self.vid_iter):
+
+            ####
+            tile_image = TileImage(im, self.n_tiles)
+            recon_img = tile_image.infer_tiles(self.inferencer)
+
+            print(s)
+
+            if self.video_path:
+                self.video_export.write(recon_img)
+            if self.show:
+                cv2.imshow(str(video_path), recon_img)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                self.vid_iter.cap.release()
+                if video_path:
+                    self.video_export.release()
+                    print("The video was successfully saved")
+                # Closes all the frames
+                cv2.destroyAllWindows()
+                break
+
+
 video_path = "../../boiler_unit_9.mp4"
+video_export_path = "../../boiler_unit_9_prediction.avi"
 # image = 'https://github.com/open-mmlab/mmpretrain/raw/main/demo/demo.JPEG'
 model_folder = "../work_dirs/efficientnet-b5_2xb4_in1k-456px_boiler_defects/"
 # config = model_folder + "efficientnet-b5_2xb4_in1k-456px_boiler_defects.py"
 config = "../configs/efficientnet/efficientnet-b5_2xb4_in1k-456px_boiler_defects.py"
 checkpoint = model_folder + "best_accuracy_top1_epoch_53.pth"
-inferencer = ImageClassificationInferencer(model=config, pretrained=checkpoint, device='cuda')
 
-
-# Stream results
-vid_iter = LoadVideo(video_path)
-
-first_frame, _ = next(vid_iter)
-if platform.system() == 'Linux':
-    cv2.namedWindow(str(video_path), cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
-    cv2.resizeWindow(str(video_path), first_frame.shape[1], first_frame.shape[0])
-
-
-for  i, (im, s) in enumerate(vid_iter):
-    if i <1200: continue
-    # im0 = annotator.result()
-    tile_image = TileImage(im)
-    recon_img = tile_image.infer_tiles(inferencer)
-
-
-    cv2.imshow(str(video_path), recon_img)
-    print(s)
-
-    key = cv2.waitKey(1) & 0xFF
-    if key == ord('q'):
-        break
-
+videoTileInferencer = VideoTileInferencer(video_path, config, checkpoint, video_export_path=video_export_path, n_tiles=8, vid_stride=15, starting_frame=1500, show=True)
+videoTileInferencer.start()
