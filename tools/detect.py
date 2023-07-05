@@ -10,7 +10,14 @@ VID_FORMATS = 'asf', 'avi', 'gif', 'm4v', 'mkv', 'mov', 'mp4', 'mpeg', 'mpg', 't
 
 
 class LoadVideo:
-    # image/video dataloader similar(stolen) with Yolov5.
+    """
+    A class for loading video frames.
+
+    Args:
+        path (str): Path to the video file.
+        vid_stride (int): Frame-rate stride of the video (default: 1).
+        starting_frame (int): The frame number to start from (default: None).
+    """
 
     def __init__(self, path, vid_stride=1, starting_frame=None):
         assert path.split('.')[-1].lower() in VID_FORMATS, 'not supported video format or wrong path'
@@ -25,36 +32,21 @@ class LoadVideo:
         return self
 
     def __next__(self):
-        # Read video
         for _ in range(self.vid_stride):
             self.cap.grab()
         ret_val, im0 = self.cap.retrieve()
 
         self.frame += 1
-        # im0 = self._cv2_rotate(im0)  # for use if cv2 autorotation is False
         s = f'video ({self.frame}/{self.frames}) {self.path}: '
-        # im = im0.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
-        # im = im0
         return im0, s
 
     def _new_video(self):
-        # Create a new video capture object
         self.frame = 0
         self.cap = cv2.VideoCapture(self.path)
         self.frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) / self.vid_stride)
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        self.orientation = int(self.cap.get(cv2.CAP_PROP_ORIENTATION_META))  # rotation degrees
-        # self.cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 0)  # disable https://github.com/ultralytics/yolov5/issues/8493
+        self.orientation = int(self.cap.get(cv2.CAP_PROP_ORIENTATION_META))
 
-    def _cv2_rotate(self, im):
-        # Rotate a cv2 video manually
-        if self.orientation == 0:
-            return cv2.rotate(im, cv2.ROTATE_90_CLOCKWISE)
-        elif self.orientation == 180:
-            return cv2.rotate(im, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        elif self.orientation == 90:
-            return cv2.rotate(im, cv2.ROTATE_180)
-        return im
 
     def _go_to_frame(self, frame_no):
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
@@ -63,24 +55,27 @@ class LoadVideo:
 
 class TileImage:
     """
+    A class for tiling and reconstructing images, in order to apply a model or visual functions in each tile.
+
     Args:
-        img: numpy array
+        img (numpy.ndarray): Input image.
+        n_tiles (int): Number of tiles to be split (default: 4).
     """
 
     def __init__(self, img, n_tiles=4):
         self.img = img
-        self.n_tiles = int(n_tiles//2) if n_tiles>1 else 1
+        self.n_tiles = int(n_tiles // 2) if n_tiles > 1 else 1
         self.tile_shape = np.array(img.shape) // self.n_tiles
         self.tiles = None
         self.reconstructed_image = None
 
-    def make_tiles(self):
+    def _make_tiles(self):
         # split into sqrt(tiles)
         self.tiles = self.img.reshape(self.n_tiles, self.tile_shape[0], self.n_tiles, self.tile_shape[1], 3)
         self.tiles = np.transpose(self.tiles, (0, 2, 1, 3, 4))
         self.tiles = self.tiles.reshape(-1, self.tile_shape[0], self.tile_shape[1], 3)
 
-    def reconstruct_tiled_image(self):
+    def _reconstruct_tiled_image(self):
         ''' reconstruct image from tiles'''
 
         recon_img = self.tiles.reshape(self.n_tiles, self.n_tiles, self.tile_shape[0], self.tile_shape[1], 3)
@@ -88,33 +83,40 @@ class TileImage:
         recon_img = recon_img.reshape( *self.img.shape)
         self.reconstructed_image = recon_img
 
+    def _add_classification_visuals(self, img, pred_class, conf: float, correct=True, threshold=None, frame_thickness=10):
+
+        color = (0, 255, 0) if correct else (0, 0, 255)
+
+        # add color frame
+        img[:, :frame_thickness, :] = color
+        img[:, -frame_thickness:, :] = color
+        img[:frame_thickness, :, :] = color
+        img[-frame_thickness:, :, :] = color
+
+        # add text
+        cv2.putText(img=img, text="confidence: " + str(round(conf, 2)), org=(50, 80),
+                    fontFace=3, fontScale=1.5, color=color, thickness=2)
+
+        cv2.putText(img=img, text="class: " + pred_class, org=(50, 130),
+                    fontFace=3, fontScale=1.5, color=color, thickness=2)
+
+        if threshold:
+            cv2.putText(img=img, text="threshold: " + str(round(threshold, 2)), org=(50, 180),
+                        fontFace=3, fontScale=1.5, color=(255, 0, 0), thickness=2)
+
     def infer_tiles(self, model, conf_thresh = 0.8):
-        def add_classification_visuals(img, pred_class, conf: float, correct=True,  threshold=None, frame_thickness=10):
+        """
+        Infers predictions on each tile using the provided model.
 
-            color = (0, 255, 0) if correct else (0, 0, 255)
+        Args:
+            model: The image classification model.(mm inferencer type).
+            conf_thresh (float): Confidence threshold (default: 0.8).
 
-            # add color frame
-            img[:, :frame_thickness, :] = color
-            img[:, -frame_thickness:, :] = color
-            img[:frame_thickness, :, :] = color
-            img[-frame_thickness:, :, :] = color
-
-            # add text
-            cv2.putText(img=img, text="confidence: " + str(round(conf, 2)), org=(50, 80),
-                        fontFace=3, fontScale=1.5, color=color, thickness=2)
-
-            cv2.putText(img=img, text="class: " + pred_class, org=(50, 130),
-                        fontFace=3, fontScale=1.5, color=color, thickness=2)
-
-            if threshold:
-                cv2.putText(img=img, text="threshold: " +  str(round(threshold, 2)), org=(50, 180),
-                        fontFace=3, fontScale=1.5, color=(255,0,0), thickness=2)
-
-
-        self.make_tiles()
-
+        Returns:
+            numpy.ndarray: Reconstructed image with classification visuals on each tile.
+        """
+        self._make_tiles()
         tile_list = [t for t in self.tiles]
-
         results = model(tile_list)
 
         for t, r in zip(tile_list, results):
@@ -125,15 +127,27 @@ class TileImage:
             # pure model prediction
             correct = not bool(r['pred_label'])
 
-            add_classification_visuals(t, pred_class=r['pred_class'], conf=r['pred_score'],
+            self._add_classification_visuals(t, pred_class=r['pred_class'], conf=r['pred_score'],
                                        correct=correct) #  threshold=conf_thresh
 
-        self.reconstruct_tiled_image()
+        self._reconstruct_tiled_image()
         return self.reconstructed_image
 
 
 class VideoTileInferencer:
+    """
+    A class for inferring predictions on tiles of a video.
 
+    Args:
+        video_path (str): Path to the input video.
+        config (str): Path to the model configuration file.
+        checkpoint (str): Path to the model checkpoint file.
+        video_export_path (str): Path to export the processed video. If a path is given, then the video will be exported there. (default: None).
+        n_tiles (int): Number of tiles to use (default: 4).
+        vid_stride (int): Frame-rate stride of the video (default: 1).
+        starting_frame (int): The frame number to start from (default: None).
+        show (bool): Whether to display the processed video (default: True).
+    """
     def __init__(self, video_path, config, checkpoint, video_export_path=None, n_tiles=4, vid_stride=1, starting_frame=None, show=True):
         self.video_path = video_path
         self.video_export_path = video_export_path
