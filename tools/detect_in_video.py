@@ -197,12 +197,13 @@ class VideoTileInferencer:
 
 if __name__ == '__main__':
     video_path = "../../boiler_unit_9.mp4"
-    video_export_path = "../../boiler_unit_9_prediction.avi"
+    video_export_path = "../../boiler_unit_9_prediction_tiled_v1.avi"
+    # video_export_path = None
     # image = 'https://github.com/open-mmlab/mmpretrain/raw/main/demo/demo.JPEG'
-    model_folder = "../work_dirs/efficientnet-b5_2xb4_in1k-456px_boiler_defects/"
+    model_folder = "../work_dirs/efficientnet-b5_2xb4_in1k-456px_boiler_defects_tiled_v1/"
     # config = model_folder + "efficientnet-b5_2xb4_in1k-456px_boiler_defects.py"
-    config = "../configs/efficientnet/efficientnet-b5_2xb4_in1k-456px_boiler_defects.py"
-    checkpoint = model_folder + "best_accuracy_top1_epoch_53.pth"
+    config = "../configs/efficientnet/efficientnet-b5_2xb4_in1k-456px_boiler_defects_tiled_v1.py"
+    checkpoint = model_folder + "best_multi-label_precision_top1_epoch_74.pth"
 
-    videoTileInferencer = VideoTileInferencer(video_path, config, checkpoint, video_export_path=video_export_path, n_tiles=8, vid_stride=15, starting_frame=1500, show=True)
+    videoTileInferencer = VideoTileInferencer(video_path, config, checkpoint, video_export_path=video_export_path, n_tiles=4, vid_stride=1, starting_frame=1500, show=True)
     videoTileInferencer.start()

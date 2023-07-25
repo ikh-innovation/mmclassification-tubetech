@@ -15,7 +15,7 @@ from mmengine.dataset import default_collate
 from mmengine.utils import to_2tuple
 from mmengine.utils.dl_utils import is_norm
 
-from mmpretrain import digit_version
+# from mmpretrain import digit_version
 from mmpretrain.apis import get_model
 from mmpretrain.registry import TRANSFORMS
 
@@ -252,12 +252,12 @@ def main():
     targets = None
     if args.target_category:
         grad_cam_v = pkg_resources.get_distribution('grad_cam').version
-        if digit_version(grad_cam_v) >= digit_version('1.3.7'):
-            from pytorch_grad_cam.utils.model_targets import \
-                ClassifierOutputTarget
-            targets = [ClassifierOutputTarget(c) for c in args.target_category]
-        else:
-            targets = args.target_category
+        # if digit_version(grad_cam_v) >= digit_version('1.3.7'):
+        from pytorch_grad_cam.utils.model_targets import \
+            ClassifierOutputTarget
+        targets = [ClassifierOutputTarget(c) for c in args.target_category]
+        # else:
+        #     targets = args.target_category
 
     # calculate cam grads and show|save the visualization image
     grayscale_cam = cam(
