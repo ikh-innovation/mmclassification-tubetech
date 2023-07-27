@@ -4,7 +4,7 @@
 # Set the folder path
 folder_path="/home/innovation/Projects/tubetech/mmclassification-tubetech/layer_activations"
 config="/home/innovation/Projects/tubetech/mmclassification-tubetech/configs/efficientnet/efficientnet-b5_2xb4_in1k-456px_boiler_defects_tiled_v1.py"
-checkpoint="/home/innovation/Projects/tubetech/mmclassification-tubetech/work_dirs/efficientnet-b5_2xb4_in1k-456px_boiler_defects_tiled_v1/best_multi-label_precision_top1_epoch_74.pth"
+checkpoint="/home/innovation/Projects/tubetech/mmclassification-tubetech/work_dirs/efficientnet-b5_2xb4_in1k-456px_boiler_defects_tiled_v1/best_multi-label_precision_top1_epoch_42.pth"
 
 # Add the module directory to the Python module search path
 module_directory="/mnt/storage/Projects/tubetech/mmclassification-tubetech"
