@@ -4,6 +4,7 @@ import cv2
 import platform
 import numpy as np
 from mmpretrain import ImageClassificationInferencer
+import time
 
 
 VID_FORMATS = 'asf', 'avi', 'gif', 'm4v', 'mkv', 'mov', 'mp4', 'mpeg', 'mpg', 'ts', 'wmv'  # include video suffixes
@@ -173,10 +174,15 @@ class VideoTileInferencer:
     def start(self):
         for i, (im, s) in enumerate(self.vid_iter):
 
-            ####
+            ####import time
+
+            start = time.time()
+
             tile_image = TileImage(im, self.n_tiles)
             recon_img = tile_image.infer_tiles(self.inferencer)
 
+            el_time = time.time() - start
+            print(" inference time (", self.n_tiles," tiles): ", round(el_time, 2), " fps: ", round(1/el_time, 2) )
             print(s)
 
             if self.video_path:
@@ -203,7 +209,7 @@ if __name__ == '__main__':
     model_folder = "../work_dirs/efficientnet-b5_2xb4_in1k-456px_boiler_defects_tiled_v1/"
     # config = model_folder + "efficientnet-b5_2xb4_in1k-456px_boiler_defects.py"
     config = "../configs/efficientnet/efficientnet-b5_2xb4_in1k-456px_boiler_defects_tiled_v1.py"
-    checkpoint = model_folder + "best_multi-label_precision_top1_epoch_74.pth"
+    checkpoint = model_folder + "best_multi-label_precision_top1_epoch_42.pth"
 
     videoTileInferencer = VideoTileInferencer(video_path, config, checkpoint, video_export_path=video_export_path, n_tiles=4, vid_stride=1, starting_frame=1500, show=True)
     videoTileInferencer.start()
